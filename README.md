@@ -16,7 +16,7 @@ Before deploying this infrastructure, ensure you have the following installed an
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/[YOUR_USERNAME]/azure-project-tf.git
+git clone https://github.com/rodonelli/azure-project-tf.git
 cd azure-project-tf
 ```
 
@@ -80,3 +80,28 @@ To enable traffic routing from the Application Gateway to AKS:
 If your project requires Azure File Sync, you must register the Jump VM as a server endpoint in the Azure Portal, as this is a complex manual configuration often left out of IaC for simplicity.
 
 ## 📂 Project Structure
+```
+.
+├── aks.tf                  # AKS Cluster, Node Pools, and Managed Identity
+├── app_gateway.tf          # Application Gateway, Frontend/Backend Pools, SSL Cert
+├── acr.tf                  # Azure Container Registry & Private Endpoints
+├── function_app.tf         # Function App and Service Plan
+├── iam.tf                  # RBAC Role Assignments (Least Privilege)
+├── identity.tf             # User-Assigned Managed Identities
+├── jump_vm.tf              # Jump VM, NSG, and NIC
+├── keyvault.tf             # Key Vault, Certificates, Secrets, Private Endpoints
+├── main.tf                 # Provider configuration and locals
+├── monitoring.tf           # Log Analytics, Diagnostic Settings, Dashboard
+├── networking.tf           # VNETs, Subnets, Peering, Public IPs
+├── postgresql.tf           # PostgreSQL Flexible Server & Private DNS
+├── storage.tf              # Storage Account, Containers, Shares, Private Endpoints
+├── variables.tf            # Input variables
+└── appgw.pfx               # SSL Certificate (Gitignored in .gitignore)
+```
+
+## 🔐 Security Notes
+```
+    Secrets: All secrets (passwords, keys) are handled via Terraform variables or Key Vault. Never commit .tfvars or secrets to the repository.
+    Network Security: All services are accessed via Private Endpoints where possible. The Jump VM is the only entry point for management (RDP), restricted by NSG.
+    Identities: Managed Identities are used for all service-to-service authentication following the Principle of Least Privilege.
+```
