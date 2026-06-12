@@ -100,7 +100,7 @@ To enable traffic routing from the Application Gateway to AKS:
 ├── postgresql.tf           # PostgreSQL Flexible Server & Private DNS
 ├── storage.tf              # Storage Account, Containers, Shares, Private Endpoints
 ├── variables.tf            # Input variables
-└── appgw.pfx               # SSL Certificate (Gitignored in .gitignore)
+└── deploy.ps1              # PowerShell script for deploying NginX image to K8s
 ```
 
 ## 🔐 Security Notes
