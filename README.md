@@ -57,16 +57,9 @@ The following steps are required after Terraform applies to fully satisfy the "C
 #### A. Build and Push Docker Image
 ```
     Get the ACR login server from the Azure Portal or CLI:
-    bash
-```
-```
     az acr login --name [YOUR_ACR_NAME]
-```
-```
+
     Build and push your sample app image:
-    bash
-```
-```
     docker build -t [YOUR_ACR_NAME].azurecr.io/sampleapp:latest .
     docker push [YOUR_ACR_NAME].azurecr.io/sampleapp:latest
 ```
