@@ -19,8 +19,15 @@ Before deploying this infrastructure, ensure you have the following installed an
 git clone https://github.com/rodonelli/azure-project-tf.git
 cd azure-project-tf
 ```
-
-### 2. Configure Variables
+### 2. Clone the Repository
+Ensure that TenantID and SubscriptionID are valid in main.tf:
+```
+provider "azurerm" {
+  tenant_id       = "YOUR TENANT ID
+  subscription_id = "YOUR SUBSCRIPTION ID"
+  
+```
+### 3. Configure Variables
 
 Review the variables.tf file. Ensure the following are set correctly:
 ```
@@ -28,23 +35,23 @@ Review the variables.tf file. Ensure the following are set correctly:
     certificate_pfx_password: Password for the SSL certificate.
     postgres_admin_password: A strong password for the PostgreSQL database.
 ```
-### 3. Initialize Terraform
+### 4. Initialize Terraform
 ```
 terraform init
 ```
-### 4. Plan the Deployment
+### 5. Plan the Deployment
 
 Review the proposed changes to ensure they align with your expectations.
 bash
 ```
 terraform plan -out=tfplan
 ```
-### 5. Apply the Infrastructure
+### 6. Apply the Infrastructure
 bash
 ```
 terraform apply tfplan
 ```
-### 6. Post-Deployment Configuration (Manual Steps)
+### 7. Post-Deployment Configuration (Manual Steps)
 
 The following steps are required after Terraform applies to fully satisfy the "Compute" and "Networking" criteria:
 #### A. Build and Push Docker Image
