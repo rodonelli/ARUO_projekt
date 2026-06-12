@@ -82,9 +82,6 @@ To enable traffic routing from the Application Gateway to AKS:
     Jump VM: Enable "Virtual Machine Patching" in the Azure Portal under "Updates" for the Jump VM.
     AKS: Enable auto_upgrade_channel in the node pool settings.
 
-#### D. Configure Azure File Sync (If Required)
-
-If your project requires Azure File Sync, you must register the Jump VM as a server endpoint in the Azure Portal, as this is a complex manual configuration often left out of IaC for simplicity.
 
 ## 📂 Project Structure
 ```
