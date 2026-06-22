@@ -230,31 +230,6 @@ Monitoring uključuje:
 
 Workbook sadrži CPU vizualizaciju za Jump VM i dodatne KQL panele za sigurnosne evente, Storage blob operacije i PostgreSQL logove.
 
-## Sigurnosne napomene
-
-Ne preporučuje se commitati:
-
-- `.tfstate` datoteke
-- `.tfvars` datoteke s tajnama
-- `appgw.pfx`
-- Terraform cache direktorije
-- lokalne evidence outpute ako sadrže subscription/resource ID-jeve koje ne želite javno objaviti
-
-Preporučeni `.gitignore`:
-
-```gitignore
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-*.tfvars.json
-crash.log
-crash.*.log
-*.pfx
-evidence/
-dist/
-__pycache__/
-```
 
 ## Datoteke
 
@@ -275,4 +250,4 @@ __pycache__/
 - `list_resources_azcli.ps1` - popis resursa preko Azure CLI-ja
 - `list_resources_python.py` - popis resursa preko Python SDK-a
 - `test_postgresql_access.ps1` - pomoć za dokaz pristupa bazi
-- `architecture_diagram.md` - Mermaid arhitekturni dijagram
+- `architecture_diagram.md` - Dijagram Arhitekture
