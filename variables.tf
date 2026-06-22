@@ -20,6 +20,12 @@ variable "certificate_pfx_path" {
   default     = "./appgw.pfx" # UPDATED: Points to appgw.pfx
 }
 
+variable "allowed_admin_ip_ranges" {
+  description = "Public IP ranges allowed for temporary administrative access to firewalled Azure PaaS resources. Replace the default with your public IP in CIDR format, for example 203.0.113.10/32."
+  type        = list(string)
+  default     = ["109.60.95.99/32"]
+}
+
 # PostgreSQL details
 variable "postgres_admin_username" {
   default = "psqladmin"
@@ -56,12 +62,42 @@ variable "function_app_name" {
   default = "func-cloud-project2"
 }
 
+variable "function_app_service_plan_sku_name" {
+  description = "App Service Plan SKU for the Function App. B1 is used because lab policies often block Elastic Premium EP1."
+  type        = string
+  default     = "B1"
+}
+
+variable "create_file_sync_cloud_endpoint" {
+  description = "Creates the Azure File Sync cloud endpoint for the file share. Disabled by default because the lab subscription blocks Storage Sync from reading firewalled storage accounts."
+  type        = bool
+  default     = false
+}
+
 # PostgreSQL Variables
 variable "postgres_admin_password" {
   description = "Password for PostgreSQL"
   type        = string
   sensitive   = true
   default     = "YourStrongP@ssw0rd!" # Change this for production
+}
+
+variable "postgres_entra_admin_object_id" {
+  description = "Object ID of the Microsoft Entra user or group that will administer PostgreSQL. Defaults to the identity running Terraform."
+  type        = string
+  default     = null
+}
+
+variable "postgres_entra_admin_principal_name" {
+  description = "Display name or UPN of the Microsoft Entra PostgreSQL administrator."
+  type        = string
+  default     = "terraform-admin"
+}
+
+variable "postgres_entra_admin_principal_type" {
+  description = "Microsoft Entra principal type for PostgreSQL administrator: User, Group, or ServicePrincipal."
+  type        = string
+  default     = "User"
 }
 
 variable "postgres_sku_name" {
@@ -79,6 +115,19 @@ variable "jump_vm_size" {
 
 variable "jump_vm_username" {
   default = "azureuser"
+}
+
+variable "jump_vm_admin_password" {
+  description = "Password for the Jump VM local administrator."
+  type        = string
+  sensitive   = true
+  default     = "YourStr0ngP@ssw0rd!"
+}
+
+variable "allowed_rdp_source_prefixes" {
+  description = "CIDR ranges allowed to RDP to the Jump VM. Replace the default with your public IP, for example 203.0.113.10/32."
+  type        = list(string)
+  default     = ["109.60.95.99/32"]
 }
 
 # Logging

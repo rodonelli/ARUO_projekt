@@ -4,16 +4,20 @@ resource "azurerm_network_security_group" "jump_nsg" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
 
-  security_rule {
-    name                       = "AllowRDP"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "3389"
-    source_address_prefix      = "*" 
-    destination_address_prefix = "*"
+  dynamic "security_rule" {
+    for_each = var.allowed_rdp_source_prefixes
+
+    content {
+      name                       = "AllowRDP-${security_rule.key}"
+      priority                   = 100 + tonumber(security_rule.key)
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "3389"
+      source_address_prefix      = security_rule.value
+      destination_address_prefix = "*"
+    }
   }
 
   tags = local.tags
@@ -21,13 +25,17 @@ resource "azurerm_network_security_group" "jump_nsg" {
 
 # Jump VM
 resource "azurerm_windows_virtual_machine" "jump" {
-  name                  = "jump-vm"
-  resource_group_name   = azurerm_resource_group.main.name
-  location              = azurerm_resource_group.main.location
-  size                  = var.jump_vm_size
-  admin_username        = var.jump_vm_username
-  admin_password        = "YourStr0ngP@ssw0rd!" # Change this
-  network_interface_ids = [azurerm_network_interface.jump.id]
+  name                      = "jump-vm"
+  resource_group_name       = azurerm_resource_group.main.name
+  location                  = azurerm_resource_group.main.location
+  size                      = var.jump_vm_size
+  admin_username            = var.jump_vm_username
+  admin_password            = var.jump_vm_admin_password
+  network_interface_ids     = [azurerm_network_interface.jump.id]
+  provision_vm_agent        = true
+  automatic_updates_enabled = true
+  patch_mode                = "AutomaticByPlatform"
+  patch_assessment_mode     = "AutomaticByPlatform"
 
   os_disk {
     caching              = "ReadWrite"

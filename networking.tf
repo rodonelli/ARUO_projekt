@@ -20,10 +20,10 @@ resource "azurerm_subnet" "aks" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.app.name
   address_prefixes     = ["10.1.0.0/24"]
-  
+
   # REMOVE the delegation block here
   # Delegation is handled by azurerm_kubernetes_cluster.main
-  
+
   service_endpoints = ["Microsoft.KeyVault", "Microsoft.ContainerRegistry"]
 }
 
@@ -33,6 +33,16 @@ resource "azurerm_subnet" "function" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.app.name
   address_prefixes     = ["10.1.1.0/24"]
+
+  delegation {
+    name = "function-delegation"
+    service_delegation {
+      name = "Microsoft.Web/serverFarms"
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/action"
+      ]
+    }
+  }
 }
 
 resource "azurerm_subnet" "db" {
@@ -40,7 +50,7 @@ resource "azurerm_subnet" "db" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.app.name
   address_prefixes     = ["10.1.2.0/24"]
-  
+
   delegation {
     name = "psql-delegation"
     service_delegation {
@@ -64,10 +74,10 @@ resource "azurerm_subnet" "agw" {
 
 # NEW: Dedicated subnet for Private Endpoints (cannot be delegated)
 resource "azurerm_subnet" "storage_pe" {
-  name                         = "storage-pe-subnet"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = azurerm_virtual_network.app.name
-  address_prefixes             = ["10.1.4.0/24"]
+  name                              = "storage-pe-subnet"
+  resource_group_name               = azurerm_resource_group.main.name
+  virtual_network_name              = azurerm_virtual_network.app.name
+  address_prefixes                  = ["10.1.4.0/24"]
   private_endpoint_network_policies = "Disabled"
 }
 
@@ -93,7 +103,7 @@ resource "azurerm_virtual_network_peering" "app_to_jump" {
   resource_group_name       = azurerm_resource_group.main.name
   virtual_network_name      = azurerm_virtual_network.app.name
   remote_virtual_network_id = azurerm_virtual_network.jump.id
-  
+
   # Ensure VNETs are done before peering
   depends_on = [
     azurerm_virtual_network.app,
@@ -109,7 +119,7 @@ resource "azurerm_virtual_network_peering" "jump_to_app" {
   resource_group_name       = azurerm_resource_group.main.name
   virtual_network_name      = azurerm_virtual_network.jump.name
   remote_virtual_network_id = azurerm_virtual_network.app.id
-  
+
   depends_on = [
     azurerm_virtual_network.app,
     azurerm_virtual_network.jump,
@@ -138,9 +148,9 @@ resource "azurerm_public_ip" "jump" {
 }
 
 resource "azurerm_subnet" "pe_appgw" {
-  name                         = "pe-appgw-subnet"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = azurerm_virtual_network.app.name
-  address_prefixes             = ["10.1.5.0/24"]
+  name                              = "pe-appgw-subnet"
+  resource_group_name               = azurerm_resource_group.main.name
+  virtual_network_name              = azurerm_virtual_network.app.name
+  address_prefixes                  = ["10.1.5.0/24"]
   private_endpoint_network_policies = "Disabled"
 }

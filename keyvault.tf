@@ -2,20 +2,21 @@
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_key_vault" "main" {
-  name                        = "kvcloudproject${random_id.suffix.hex}"
-  location                    = azurerm_resource_group.main.location
-  resource_group_name         = azurerm_resource_group.main.name
-  
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  
-  sku_name                    = "standard"
-  soft_delete_retention_days  = 7
-  purge_protection_enabled    = false
+  name                = "kvcloudproject${random_id.suffix.hex}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
 
-  # CRITICAL FIX: Allow Azure Services to bypass firewall for AGW access
+  tenant_id = data.azurerm_client_config.current.tenant_id
+
+  sku_name                      = "standard"
+  soft_delete_retention_days    = 7
+  purge_protection_enabled      = false
+  public_network_access_enabled = true
+
   network_acls {
-    default_action = "Allow" 
-    bypass         = "AzureServices" 
+    default_action = "Deny"
+    bypass         = "AzureServices"
+    ip_rules       = var.allowed_admin_ip_ranges
   }
 
   # --- FIX: Add access_policy for App Gateway Identity ---
@@ -52,6 +53,28 @@ resource "azurerm_key_vault" "main" {
   tags = local.tags
 }
 
+resource "azurerm_private_dns_zone" "keyvault" {
+  name                = "privatelink.vaultcore.azure.net"
+  resource_group_name = azurerm_resource_group.main.name
+  tags                = local.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "keyvault_app" {
+  name                  = "keyvault-app-link"
+  resource_group_name   = azurerm_resource_group.main.name
+  private_dns_zone_name = azurerm_private_dns_zone.keyvault.name
+  virtual_network_id    = azurerm_virtual_network.app.id
+  registration_enabled  = false
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "keyvault_jump" {
+  name                  = "keyvault-jump-link"
+  resource_group_name   = azurerm_resource_group.main.name
+  private_dns_zone_name = azurerm_private_dns_zone.keyvault.name
+  virtual_network_id    = azurerm_virtual_network.jump.id
+  registration_enabled  = false
+}
+
 # Upload SSL Certificate to Key Vault
 resource "azurerm_key_vault_certificate" "ssl" {
   name         = "agick8-cert"
@@ -75,7 +98,7 @@ resource "azurerm_key_vault_certificate" "ssl" {
     secret_properties {
       content_type = "application/x-pkcs12"
     }
-    
+
     lifetime_action {
       action {
         action_type = "AutoRenew"
@@ -128,13 +151,18 @@ resource "azurerm_private_endpoint" "kv" {
   name                = "pe-kv-aks"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
-  subnet_id = azurerm_subnet.pe_appgw.id 
-  
+  subnet_id           = azurerm_subnet.pe_appgw.id
+
   private_service_connection {
     name                           = "psc-kv"
     is_manual_connection           = false
     private_connection_resource_id = azurerm_key_vault.main.id
     subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "kv-zone-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.keyvault.id]
   }
 
   tags = local.tags
@@ -146,12 +174,17 @@ resource "azurerm_private_endpoint" "kv_jump" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   subnet_id           = azurerm_subnet.jump.id
-  
+
   private_service_connection {
     name                           = "psc-kv-jump"
     is_manual_connection           = false
     private_connection_resource_id = azurerm_key_vault.main.id
     subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "kv-jump-zone-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.keyvault.id]
   }
 
   tags = local.tags

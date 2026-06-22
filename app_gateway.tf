@@ -33,6 +33,11 @@ resource "azurerm_application_gateway" "main" {
     name = "aks-backend-pool"
   }
 
+  backend_address_pool {
+    name  = "function-backend-pool"
+    fqdns = [azurerm_linux_function_app.main.default_hostname]
+  }
+
   backend_http_settings {
     name                  = "aks-http-settings"
     cookie_based_affinity = "Disabled"
@@ -41,21 +46,49 @@ resource "azurerm_application_gateway" "main" {
     request_timeout       = 60
   }
 
+  backend_http_settings {
+    name                                = "function-https-settings"
+    cookie_based_affinity               = "Disabled"
+    port                                = 443
+    protocol                            = "Https"
+    request_timeout                     = 60
+    pick_host_name_from_backend_address = true
+  }
+
   http_listener {
-    name                           = "aks-listener"
+    name                           = "https-listener"
     frontend_ip_configuration_name = "app-gw-public-ip"
     frontend_port_name             = "https"
     protocol                       = "Https"
     ssl_certificate_name           = "app-gw-cert"
   }
 
+  url_path_map {
+    name                               = "app-path-map"
+    default_backend_address_pool_name  = "aks-backend-pool"
+    default_backend_http_settings_name = "aks-http-settings"
+
+    path_rule {
+      name                       = "aks-path"
+      paths                      = ["/aks/*"]
+      backend_address_pool_name  = "aks-backend-pool"
+      backend_http_settings_name = "aks-http-settings"
+    }
+
+    path_rule {
+      name                       = "functionapp-path"
+      paths                      = ["/functionapp/*", "/functionap/*"]
+      backend_address_pool_name  = "function-backend-pool"
+      backend_http_settings_name = "function-https-settings"
+    }
+  }
+
   request_routing_rule {
-    name                       = "aks-route-rule"
-    rule_type                  = "Basic"
-    http_listener_name         = "aks-listener"
-    backend_address_pool_name  = "aks-backend-pool"
-    backend_http_settings_name = "aks-http-settings"
-    priority                   = 100
+    name               = "path-based-route-rule"
+    rule_type          = "PathBasedRouting"
+    http_listener_name = "https-listener"
+    url_path_map_name  = "app-path-map"
+    priority           = 100
   }
 
   ssl_certificate {
@@ -69,4 +102,9 @@ resource "azurerm_application_gateway" "main" {
   }
 
   tags = local.tags
+
+  depends_on = [
+    azurerm_private_endpoint.function_app,
+    azurerm_private_endpoint.kv
+  ]
 }

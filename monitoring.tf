@@ -9,13 +9,35 @@ resource "azurerm_log_analytics_workspace" "main" {
   tags = local.tags
 }
 
-# --- Diagnostic Settings for Storage Account ---
-resource "azurerm_monitor_diagnostic_setting" "storage" {
-  name                       = "storage-diag"
+# --- Diagnostic Settings for Storage Account Metrics ---
+resource "azurerm_monitor_diagnostic_setting" "storage_account" {
+  name                       = "storage-account-diag"
   target_resource_id         = azurerm_storage_account.main.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
 
-  # Omitted enabled_log due to API restrictions. Metrics are enabled.
+  enabled_metric {
+    category = "AllMetrics"
+  }
+}
+
+# --- Diagnostic Settings for Blob Access Logs ---
+resource "azurerm_monitor_diagnostic_setting" "storage_blob" {
+  name                       = "storage-blob-diag"
+  target_resource_id         = "${azurerm_storage_account.main.id}/blobServices/default"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+
+  enabled_log {
+    category = "StorageRead"
+  }
+
+  enabled_log {
+    category = "StorageWrite"
+  }
+
+  enabled_log {
+    category = "StorageDelete"
+  }
+
   enabled_metric {
     category = "AllMetrics"
   }
@@ -30,7 +52,7 @@ resource "azurerm_monitor_diagnostic_setting" "keyvault" {
   enabled_log {
     category = "AuditEvent"
   }
-  
+
   enabled_metric {
     category = "AllMetrics"
   }
@@ -45,63 +67,153 @@ resource "azurerm_monitor_diagnostic_setting" "postgresql" {
   enabled_log {
     category = "PostgreSQLLogs"
   }
-  
+
   enabled_metric {
     category = "AllMetrics"
   }
 }
 
-# --- Portal Dashboard for CPU Visualization ---
-resource "azurerm_portal_dashboard" "main" {
-  name                = "dashboard-main"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+# --- Azure Monitor Agent and Data Collection for Jump VM ---
+resource "azurerm_virtual_machine_extension" "jump_ama" {
+  name                       = "AzureMonitorWindowsAgent"
+  virtual_machine_id         = azurerm_windows_virtual_machine.jump.id
+  publisher                  = "Microsoft.Azure.Monitor"
+  type                       = "AzureMonitorWindowsAgent"
+  type_handler_version       = "1.0"
+  auto_upgrade_minor_version = true
+  automatic_upgrade_enabled  = true
 
-  dashboard_properties = jsonencode({
-    lenses = {
-      "0" = {
-        order = 0
-        parts = {
-          "0" = {
-            position = {
-              x       = 0
-              y       = 0
-              rowSpan = 4
-              colSpan = 6
-            }
-            metadata = {
-              inputs = [
-                {
-                  name    = "ComponentId"
-                  value   = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/resourceGroups/${azurerm_resource_group.main.name}/providers/microsoft.compute/virtualMachines/${azurerm_windows_virtual_machine.jump.name}"
-                }
-              ]
-              type               = "Extension/HubsExtension/PartType/VMWindowsPart"
-              settings = {
-                content = {
-                  settings = {
-                    content = ""
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+  tags = local.tags
+}
+
+resource "azurerm_monitor_data_collection_rule" "jump_vm" {
+  name                = "dcr-jump-vm"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  kind                = "Windows"
+
+  destinations {
+    log_analytics {
+      name                  = "log-analytics"
+      workspace_resource_id = azurerm_log_analytics_workspace.main.id
     }
-    metadata = {
-      model = {
-        timeRange = {
-          value = {
-            relative = {
-              duration = 24
-              timeUnit = 1
-            }
-          }
-          type = "MsPortalFx.Composition.Configuration.ValueTypes.TimeRange"
-        }
-      }
+  }
+
+  data_sources {
+    performance_counter {
+      name                          = "windows-performance"
+      streams                       = ["Microsoft-Perf"]
+      sampling_frequency_in_seconds = 60
+      counter_specifiers = [
+        "\\Processor(_Total)\\% Processor Time",
+        "\\Memory\\Available MBytes",
+        "\\LogicalDisk(_Total)\\% Free Space"
+      ]
     }
+
+    windows_event_log {
+      name    = "windows-security-events"
+      streams = ["Microsoft-Event"]
+      x_path_queries = [
+        "Security!*[System[(band(Keywords,13510798882111488))]]",
+        "Application!*[System[(Level=1 or Level=2 or Level=3)]]",
+        "System!*[System[(Level=1 or Level=2 or Level=3)]]"
+      ]
+    }
+  }
+
+  data_flow {
+    streams      = ["Microsoft-Perf", "Microsoft-Event"]
+    destinations = ["log-analytics"]
+  }
+
+  tags = local.tags
+}
+
+resource "azurerm_monitor_data_collection_rule_association" "jump_vm" {
+  name                    = "dcr-association-jump-vm"
+  target_resource_id      = azurerm_windows_virtual_machine.jump.id
+  data_collection_rule_id = azurerm_monitor_data_collection_rule.jump_vm.id
+}
+
+resource "random_uuid" "workbook" {}
+
+resource "azurerm_application_insights_workbook" "main" {
+  name                = random_uuid.workbook.result
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  display_name        = "Cloud Project Monitoring Workbook"
+  source_id           = lower(azurerm_log_analytics_workspace.main.id)
+  category            = "workbook"
+
+  data_json = jsonencode({
+    version = "Notebook/1.0"
+    items = [
+      {
+        type = 1
+        content = {
+          json = "# Cloud Project Monitoring\nWorkbook for VM CPU, security events, PostgreSQL logs, and Storage blob access logs."
+        }
+        name = "title"
+      },
+      {
+        type = 3
+        content = {
+          version       = "KqlItem/1.0"
+          query         = "Perf\n| where Computer has \"jump-vm\"\n| where ObjectName == \"Processor\" and CounterName == \"% Processor Time\" and InstanceName == \"_Total\"\n| summarize AvgCPU = avg(CounterValue) by bin(TimeGenerated, 5m)\n| render timechart"
+          size          = 0
+          title         = "Jump VM CPU usage"
+          queryType     = 0
+          resourceType  = "microsoft.operationalinsights/workspaces"
+          visualization = "timechart"
+        }
+        name = "jump-vm-cpu"
+      },
+      {
+        type = 3
+        content = {
+          version       = "KqlItem/1.0"
+          query         = "Event\n| where EventLog == \"Security\"\n| summarize Events = count() by EventID, bin(TimeGenerated, 1h)\n| order by TimeGenerated desc"
+          size          = 0
+          title         = "Jump VM security events"
+          queryType     = 0
+          resourceType  = "microsoft.operationalinsights/workspaces"
+          visualization = "table"
+        }
+        name = "security-events"
+      },
+      {
+        type = 3
+        content = {
+          version       = "KqlItem/1.0"
+          query         = "StorageBlobLogs\n| where OperationName has_any (\"GetBlob\", \"PutBlob\", \"DeleteBlob\")\n| summarize Operations = count() by OperationName, bin(TimeGenerated, 1h)\n| render columnchart"
+          size          = 0
+          title         = "Storage blob read/write/delete operations"
+          queryType     = 0
+          resourceType  = "microsoft.operationalinsights/workspaces"
+          visualization = "barchart"
+        }
+        name = "storage-blob-access"
+      },
+      {
+        type = 3
+        content = {
+          version       = "KqlItem/1.0"
+          query         = "AzureDiagnostics\n| where ResourceProvider == \"MICROSOFT.DBFORPOSTGRESQL\"\n| summarize LogEvents = count() by Category, bin(TimeGenerated, 1h)\n| order by TimeGenerated desc"
+          size          = 0
+          title         = "PostgreSQL diagnostic logs"
+          queryType     = 0
+          resourceType  = "microsoft.operationalinsights/workspaces"
+          visualization = "table"
+        }
+        name = "postgresql-logs"
+      }
+    ]
+    styleSettings = {}
+    isLocked      = false
+    fallbackResourceIds = [
+      lower(azurerm_log_analytics_workspace.main.id)
+    ]
   })
 
   tags = local.tags

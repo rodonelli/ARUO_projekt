@@ -1,68 +1,83 @@
-# deploy_app.ps1
-# Run this script AFTER terraform apply has finished.
+param(
+    [string]$ResourceGroup = "rg-cloud-project",
+    [string]$AksName = "aks-cloud-project",
+    [string]$Namespace = "cloud-app",
+    [string]$AcrName = "",
+    [string]$ImageName = "cloud-app/nginx",
+    [string]$ImageTag = "latest",
+    [string]$DockerContext = ".\app",
+    [string]$SourceImage = "mcr.microsoft.com/azuredocs/aks-helloworld:v1",
+    [string]$SubscriptionId = "",
+    [switch]$UseDirectKubectl
+)
 
-# --- CONFIGURATION ---
-$RESOURCE_GROUP = "rg-cloud-project"
-$AKS_NAME = "aks-cloud-project"
-$NAMESPACE = "cloud-app"
-$ACR_NAME = "acrcloudproject1d2f5375" # Updated to your actual ACR name
+$ErrorActionPreference = "Stop"
+
+function Invoke-Step {
+    param(
+        [string]$Message,
+        [scriptblock]$Command
+    )
+
+    Write-Host ""
+    Write-Host $Message -ForegroundColor Yellow
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Step failed: $Message"
+    }
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Starting AKS Application Deployment..." -ForegroundColor Cyan
+Write-Host "AKS application deployment" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "For a private AKS cluster, the default mode uses 'az aks command invoke' so it can run without direct private API DNS access." -ForegroundColor Cyan
 
-# 1. Get AKS Credentials
-Write-Host "1. Getting AKS credentials..." -ForegroundColor Yellow
-az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME --overwrite-existing
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: Failed to get AKS credentials. Ensure AKS is deployed and you are logged in." -ForegroundColor Red
-    exit 1
+if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    Invoke-Step "Selecting Azure subscription '$SubscriptionId'..." {
+        az account set --subscription $SubscriptionId
+    }
 }
 
-# 2. Verify kubectl connection
-Write-Host "2. Verifying kubectl connection..." -ForegroundColor Yellow
-kubectl get nodes
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: kubectl is not configured correctly." -ForegroundColor Red
-    exit 1
+if ([string]::IsNullOrWhiteSpace($AcrName)) {
+    $AcrName = az acr list --resource-group $ResourceGroup --query "[0].name" -o tsv
+    if ([string]::IsNullOrWhiteSpace($AcrName)) {
+        throw "Could not find an Azure Container Registry in resource group '$ResourceGroup'."
+    }
 }
 
-# 3. Create Namespace
-Write-Host "3. Creating namespace '$NAMESPACE'..." -ForegroundColor Yellow
-kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-# 4. Get ACR Credentials for Kubernetes Secret
-Write-Host "4. Configuring ACR Authentication Secret..." -ForegroundColor Yellow
-
-# Get ACR Password
-$ACR_PASSWORD = az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv
-# Get ACR Username
-$ACR_USER = az acr credential show --name $ACR_NAME --query "username" -o tsv
-
-# Create the Kubernetes Secret using kubectl
-# This allows the AKS cluster to pull images from your private ACR
-kubectl create secret docker-registry acr-secret `
-    --docker-server="$ACR_NAME.azurecr.io" `
-    --docker-username="$ACR_USER" `
-    --docker-password="$ACR_PASSWORD" `
-    --namespace=$NAMESPACE `
-    --dry-run=client -o yaml | kubectl apply -f -
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Warning: Could not create ACR Secret. Ensure ACR name is correct and Admin is enabled." -ForegroundColor Yellow
-    Write-Host "Run: az acr update -n $ACR_NAME --admin-enabled true" -ForegroundColor Yellow
+$AcrLoginServer = az acr show --name $AcrName --query "loginServer" -o tsv
+if ([string]::IsNullOrWhiteSpace($AcrLoginServer)) {
+    throw "Could not resolve ACR login server for '$AcrName'."
 }
 
-# 5. Deploy Example App (Nginx)
-Write-Host "5. Deploying Nginx Example App..." -ForegroundColor Yellow
+$Image = "$AcrLoginServer/$ImageName`:$ImageTag"
 
-# Note: Fixed YAML indentation for 'imagePullSecrets'
-$k8s_manifest = @"
+if (Test-Path (Join-Path $DockerContext "Dockerfile")) {
+    Invoke-Step "Building and pushing container image to ACR with az acr build..." {
+        az acr build --registry $AcrName --image "$ImageName`:$ImageTag" $DockerContext
+    }
+}
+else {
+    Invoke-Step "No local Dockerfile found. Importing '$SourceImage' into private ACR as deployment evidence..." {
+        az acr import `
+            --name $AcrName `
+            --source $SourceImage `
+            --image "$ImageName`:$ImageTag" `
+            --force
+    }
+}
+
+$Manifest = @"
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $Namespace
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-deployment
-  namespace: $NAMESPACE
+  namespace: $Namespace
 spec:
   replicas: 2
   selector:
@@ -73,50 +88,85 @@ spec:
       labels:
         app: nginx
     spec:
-      imagePullSecrets:
-        - name: acr-secret
       containers:
       - name: nginx
-        image: $ACR_NAME.azurecr.io/nginx:latest
+        image: $Image
         ports:
         - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: nginx-service
-  namespace: $NAMESPACE
+  namespace: $Namespace
 spec:
   selector:
     app: nginx
   ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 80
+  - protocol: TCP
+    port: 80
+    targetPort: 80
   type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: $Namespace
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/backend-path-prefix: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /aks
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-service
+            port:
+              number: 80
 "@
 
-# Apply the manifest
-$k8s_manifest | kubectl apply -f -
+if ($UseDirectKubectl) {
+    Invoke-Step "Getting AKS credentials..." {
+        az aks get-credentials --resource-group $ResourceGroup --name $AksName --overwrite-existing
+    }
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: Failed to deploy Nginx app. Check YAML syntax." -ForegroundColor Red
-    exit 1
+    Invoke-Step "Verifying kubectl access..." {
+        kubectl get nodes
+    }
+
+    Invoke-Step "Applying Kubernetes manifests..." {
+        $Manifest | kubectl apply -f -
+    }
+
+    Invoke-Step "Waiting for rollout..." {
+        kubectl rollout status deployment/nginx-deployment -n $Namespace --timeout=180s
+    }
+
+    Write-Host ""
+    Write-Host "Deployment complete." -ForegroundColor Green
+    kubectl get deploy,pods,svc,ingress -n $Namespace
 }
+else {
+    $ManifestBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Manifest))
+    $AksCommand = "echo $ManifestBase64 | base64 -d | kubectl apply -f - && kubectl rollout status deployment/nginx-deployment -n $Namespace --timeout=180s && kubectl get deploy,pods,svc,ingress -n $Namespace"
 
-# 6. Verify Deployment
-Write-Host "6. Verifying Deployment Status..." -ForegroundColor Yellow
-kubectl get pods -n $NAMESPACE -w
-$pid = $LASTEXITCODE # Note: -w keeps the stream open, so we start a separate check
+    Invoke-Step "Applying Kubernetes manifests through az aks command invoke..." {
+        az aks command invoke `
+            --resource-group $ResourceGroup `
+            --name $AksName `
+            --command $AksCommand
+    }
 
-Write-Host "Fetching initial pod status..." -ForegroundColor Yellow
-Start-Sleep -Seconds 5
-kubectl get pods -n $NAMESPACE
-
-Write-Host "Fetching Service status..." -ForegroundColor Yellow
-kubectl get svc -n $NAMESPACE
-
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Deployment Complete!" -ForegroundColor Green
-Write-Host "Check the pods in the '$NAMESPACE' namespace." -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Deployment complete." -ForegroundColor Green
+}

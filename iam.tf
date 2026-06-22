@@ -101,7 +101,15 @@ resource "azurerm_role_assignment" "terraform_to_storage_file_data" {
   depends_on           = [azurerm_storage_account.main]
 }
 
-# 10. Your User (Terraform Provider) -> Key Vault Certificate Permissions
+# 10. Your User (Terraform Provider) -> Storage Account Contributor for Azure File Sync cloud endpoint creation
+resource "azurerm_role_assignment" "terraform_to_storage_account_contributor" {
+  role_definition_name = "Storage Account Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+  scope                = azurerm_storage_account.main.id
+  depends_on           = [azurerm_storage_account.main]
+}
+
+# 11. Your User (Terraform Provider) -> Key Vault Certificate Permissions
 resource "azurerm_role_assignment" "terraform_to_kv_cert" {
   role_definition_name = "Key Vault Certificates Officer"
   principal_id         = data.azurerm_client_config.current.object_id
